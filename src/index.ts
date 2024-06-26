@@ -158,6 +158,7 @@ app.get("/players/:id", async (req, res) => {
       economy:
         (playerWithStats.bowlingStats?.runsConceded || 0) /
         (playerWithStats.bowlingStats?.overs || 0),
+      runsConceded: playerWithStats.bowlingStats?.runsConceded,
       bestBowling: playerWithStats.bowlingStats?.bestBowling,
     };
 
