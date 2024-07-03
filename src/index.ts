@@ -24,6 +24,22 @@ cloudinary.v2.config({
   api_key: process.env.API_KEY,
   api_secret: process.env.API_SECRET,
 });
+export const deleteCloudImage = async (ids: string, res) => {
+  await cloudinary.v2?.api.delete_resources(
+    [ids],
+    {
+      resource_type: "image",
+    },
+    (error, _) => {
+      if (error) {
+        return res.status(500).json({
+          message: "Something went wrong while deleting image/video",
+          status: 500,
+        });
+      }
+    }
+  );
+};
 
 app.get("/players", async (req, res) => {
   const result = await db
@@ -162,12 +178,85 @@ app.get("/players/:id", async (req, res) => {
       bestBowling: playerWithStats.bowlingStats?.bestBowling,
     };
 
+    console.log(playerWithAge.economy)
+
     res.status(200).json(playerWithAge);
   } catch (error) {
     console.error("Error fetching player data:", error);
     res.status(500).json({ message: "Internal server error" });
   }
 });
+
+app.patch('/players/:id', async (req, res, next) => {
+  try {
+    const playerId = parseInt(req.params.id);
+    const { name, role, battingStyle, bowlingStyle, dob } = req.body;
+
+    // Fetch the current player data
+    const currentPlayer = await db.select().from(players).where(eq(players.id, playerId)).get();
+
+    if (!currentPlayer) {
+      return res.status(404).json({ message: 'Player not found' });
+    }
+
+    // Prepare the update object
+    const updateData: Partial<typeof players.$inferInsert> = {
+      name: name || currentPlayer.name,
+      role: role || currentPlayer.role,
+      battingStyle: battingStyle || currentPlayer.battingStyle,
+      bowlingStyle: bowlingStyle || currentPlayer.bowlingStyle,
+      dob: dob || currentPlayer.dob,
+    };
+
+    // Handle profile image update
+    if (req.files) {
+      // Delete the existing image from Cloudinary
+      if (currentPlayer.profile) {
+        const publicId = currentPlayer.profile.split('/').pop()?.split('.')[0];
+        if (publicId) {
+          await deleteCloudImage(publicId, res)
+        }
+      }
+      const profileFile: any = req.files.profile;
+      const result = await cloudinary.v2.uploader.upload(
+        profileFile.tempFilePath,
+        {
+          folder: "player_profiles",
+        }
+      );
+
+
+      // Upload the new image to Cloudinary
+      // const result = await cloudinary.uploader.upload(req.file.path, {
+      //   folder: 'player_profiles',
+      // });
+
+      updateData.profile = result.secure_url;
+    }
+
+    // Update the player in the database
+    await db.update(players)
+      .set(updateData)
+      .where(eq(players.id, playerId))
+      .run();
+
+    res.json({ message: 'Player updated successfully' });
+  } catch (error) {
+    next(error);
+  }
+})
+
+
+app.delete('/players/:id', async (req, res) => {
+  const playerId = parseInt(req.params.id);
+  const currentPlayer = await db.select().from(players).where(eq(players.id, playerId)).get();
+
+  await db.delete(players).where(eq(players.id, currentPlayer.id))
+
+  res.json({ messag: "Player deleted" })
+
+})
+
 const parseBowlingFigures = (figures: any) => {
   if (!figures) return { wickets: 0, runs: 0 };
   const [wickets, runs] = figures.split("/").map(Number);
