@@ -12,6 +12,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.deleteCloudImage = void 0;
 const express_1 = __importDefault(require("express"));
 const db_1 = require("./db");
 const schema_1 = require("./db/schema");
@@ -34,6 +35,20 @@ cloudinary_1.default.v2.config({
     api_key: process.env.API_KEY,
     api_secret: process.env.API_SECRET,
 });
+const deleteCloudImage = (ids, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    yield ((_a = cloudinary_1.default.v2) === null || _a === void 0 ? void 0 : _a.api.delete_resources([ids], {
+        resource_type: "image",
+    }, (error, _) => {
+        if (error) {
+            return res.status(500).json({
+                message: "Something went wrong while deleting image/video",
+                status: 500,
+            });
+        }
+    }));
+});
+exports.deleteCloudImage = deleteCloudImage;
 app.get("/players", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     const result = yield db_1.db
         .select({
@@ -154,12 +169,67 @@ app.get("/players/:id", (req, res) => __awaiter(void 0, void 0, void 0, function
             runsConceded: (_v = playerWithStats.bowlingStats) === null || _v === void 0 ? void 0 : _v.runsConceded,
             bestBowling: (_w = playerWithStats.bowlingStats) === null || _w === void 0 ? void 0 : _w.bestBowling,
         };
+        console.log(playerWithAge.economy);
         res.status(200).json(playerWithAge);
     }
     catch (error) {
         console.error("Error fetching player data:", error);
         res.status(500).json({ message: "Internal server error" });
     }
+}));
+app.patch('/players/:id', (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
+    try {
+        const playerId = parseInt(req.params.id);
+        const { name, role, battingStyle, bowlingStyle, dob } = req.body;
+        // Fetch the current player data
+        const currentPlayer = yield db_1.db.select().from(schema_1.players).where((0, drizzle_orm_1.eq)(schema_1.players.id, playerId)).get();
+        if (!currentPlayer) {
+            return res.status(404).json({ message: 'Player not found' });
+        }
+        // Prepare the update object
+        const updateData = {
+            name: name || currentPlayer.name,
+            role: role || currentPlayer.role,
+            battingStyle: battingStyle || currentPlayer.battingStyle,
+            bowlingStyle: bowlingStyle || currentPlayer.bowlingStyle,
+            dob: dob || currentPlayer.dob,
+        };
+        // Handle profile image update
+        if (req.files) {
+            // Delete the existing image from Cloudinary
+            if (currentPlayer.profile) {
+                const publicId = (_a = currentPlayer.profile.split('/').pop()) === null || _a === void 0 ? void 0 : _a.split('.')[0];
+                if (publicId) {
+                    yield (0, exports.deleteCloudImage)(publicId, res);
+                }
+            }
+            const profileFile = req.files.profile;
+            const result = yield cloudinary_1.default.v2.uploader.upload(profileFile.tempFilePath, {
+                folder: "player_profiles",
+            });
+            // Upload the new image to Cloudinary
+            // const result = await cloudinary.uploader.upload(req.file.path, {
+            //   folder: 'player_profiles',
+            // });
+            updateData.profile = result.secure_url;
+        }
+        // Update the player in the database
+        yield db_1.db.update(schema_1.players)
+            .set(updateData)
+            .where((0, drizzle_orm_1.eq)(schema_1.players.id, playerId))
+            .run();
+        res.json({ message: 'Player updated successfully' });
+    }
+    catch (error) {
+        next(error);
+    }
+}));
+app.delete('/players/:id', (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    const playerId = parseInt(req.params.id);
+    const currentPlayer = yield db_1.db.select().from(schema_1.players).where((0, drizzle_orm_1.eq)(schema_1.players.id, playerId)).get();
+    yield db_1.db.delete(schema_1.players).where((0, drizzle_orm_1.eq)(schema_1.players.id, currentPlayer.id));
+    res.json({ messag: "Player deleted" });
 }));
 const parseBowlingFigures = (figures) => {
     if (!figures)
